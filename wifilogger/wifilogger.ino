@@ -2,7 +2,11 @@
 #include <WiFi.h>
 #include <WiFiClient.h>
 #include <WiFiServer.h>
+#include <Wire.h>
+#include <BMA222.h>
+
 #include "local_defs.h"
+#include "url_decode.h"
 
 static char setup_page[] = "<html><head>CC3200 logger for embedded.com blog</head>\n"
 "<body><H1>Welcome to cc3200 web logger</H1>\n"
@@ -15,17 +19,15 @@ static char setup_page[] = "<html><head>CC3200 logger for embedded.com blog</hea
 "<input type=\"submit\" value=\"OK\">\n"
 "</form></body></html>\n";
 
-
-credentials_t credentials;
 unsigned char file_name[] = "creds.bin";
-const char REF_TOKEN[] = "s.cgi?";
-const char SSID_TOKEN[] = "ssid=";
-const char PWD_TOKEN[] = "pwd=";
+credentials_t credentials;
+char temp_pass[PASS_LEN] = {0};
+char temp_ssid[SSID_LEN] = {0};
 token_state_t state = SEEN_NOTHING;
 char token_len = 0;
-
-
 WiFiServer server(80);
+
+BMA222 accelerometer;
 
 void printWifiStatus() {
   // print the SSID of the network you're attached to:
@@ -162,15 +164,15 @@ token_state_t run_statemachine_provision(char c)
       }
     break;
     case READ_SSID:
-      if((c == '&') || (token_len > sizeof(credentials.ssid)))
+      if((c == '&') || (token_len > sizeof(temp_ssid)))
       {
-        credentials.ssid[token_len] = '\0';
+        temp_ssid[token_len] = '\0';
         state = SEEN_SSID;
         Serial.println("->SEEN_SSID");
         token_len = 0;
         break;
       }
-      credentials.ssid[token_len] = c;
+      temp_ssid[token_len] = c;
       token_len++;
     break;
     case SEEN_SSID:
@@ -191,18 +193,29 @@ token_state_t run_statemachine_provision(char c)
       }
     break;
     case SEEN_PWD:
-      Serial.println("Provisioning to wifi...");
+   
+        
+        Serial.println("Provisioning to wifi...");
+     
     break;
     case READ_PWD:
-      if((c == '\n' || c == '\r' || c == '&') || (token_len > sizeof(credentials.pass)))
+      if((c == '\n' || c == '\r' || c == '&') || (token_len > sizeof(temp_pass)))
       {
-        credentials.pass[token_len] = '\0';
-        state = SEEN_PWD;
-        Serial.println("->READ_PWD");        
+        temp_pass[token_len] = '\0';
+        if(decode(temp_ssid, credentials.ssid) > 0 &&      
+            decode(temp_pass, credentials.pass) > 0)
+        {        
+          state = SEEN_PWD;
+          Serial.println("->SEEN_PWD");
+        }
+        else
+        {
+          state = SEEN_NOTHING;
+        }        
         token_len = 0;
         break;
       }
-      credentials.pass[token_len] = c;
+      temp_pass[token_len] = c;
       token_len++;
     break;
     default:
@@ -276,6 +289,7 @@ void loop()
             printWifiStatus();
             credentials.is_provisioned = 1;
             save_credentials();
+            accelerometer.begin();
             pinMode(GREEN_LED, OUTPUT);
           }
           // if you've gotten to the end of the line (received a newline
@@ -316,6 +330,17 @@ void loop()
   // data logging functionality
   else
   {
+    float x = BIT2G * accelerometer.readXData();
+    float y = BIT2G * accelerometer.readYData();
+    float z = BIT2G * accelerometer.readZData();
+    Serial.print("<");
+    Serial.print(x);
+    Serial.print(", ");
+    Serial.print(y);
+    Serial.print(", ");
+    Serial.print(z);    
+    Serial.println(">");
+    delay(1000);
   }
   
   
